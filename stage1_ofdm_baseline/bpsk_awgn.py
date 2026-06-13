@@ -45,7 +45,7 @@ class UncodedSystemAWGN(sionna.phy.Block):
         super().__init__()
         self.num_bits_per_symbol = num_bits_per_symbol
         self.block_length        = block_length
-        self.constellation = sionna.phy.mapping.Constellation("pam", self.num_bits_per_symbol)
+        self.constellation = sionna.phy.mapping.Constellation("pam", self.num_bits_per_symbol) #using 2-PAM as BPSK
         self.mapper        = sionna.phy.mapping.Mapper(constellation=self.constellation)
         self.demapper      = sionna.phy.mapping.Demapper("app", constellation=self.constellation)
         self.binary_source = sionna.phy.mapping.BinarySource()
