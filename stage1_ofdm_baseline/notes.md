@@ -6,7 +6,7 @@
 - sample channel using GenerateOFDMChannel batch size number of times, using which we estimate the time domain (fftsize x fft_size), frequency domain (n_ofdm_sym x n_ofdm_sym) and spatial covariance (nrx x nrx) matrices.
 - StreamManagement - defines the relationship between transmitters, receivers and data streams. SISO case - 1 Rx, 1 Tx and 1 stream
 - Channel estimation at pilot REs is done using least squares, and the interpolation for data caryring REs using nearest negbours, Linear and LMMSE are supported.
-- LMMSE needs channel statistics and nearest neigbours is the easiest but very error prone.
+- LMMSE needs channel statistics and nearest neigbours is the easiest to implemnet but very error prone.
 
 
 
