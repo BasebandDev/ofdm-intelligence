@@ -66,11 +66,6 @@ class UncodedOFDMAWGN(sionna.phy.Block):
         num_bits_per_symbol=self.num_bits_per_symbol,
         coderate=1.0
     )
-      if isinstance(no, torch.Tensor):
-        no = no.detach().clone().to(dtype=torch.float32, device=sionna.phy.config.device)
-      else:
-        no = torch.tensor(no, dtype=torch.float32, device=sionna.phy.config.device)
-
       bits = self.binary_source([batch_size, 1, 1, self.block_length])
       x    = self.mapper(bits)
       x_rg = self.rg_mapper(x)
