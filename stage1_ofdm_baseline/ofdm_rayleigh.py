@@ -47,6 +47,10 @@ PILOT_CONFIGS = {
 
 # ── Model ──────────────────────────────────────────────────────────────────────
 class OFDMRayleigh(sionna.phy.Block):
+    """
+    OFDM Rayleigh fading model with optional perfect CSI.
+    Logs channel estimation MSE per call() for later analysis.
+    """
     def __init__(self, num_bits_per_symbol, pilot_indices, perfect_csi=False):
         super().__init__()
 
@@ -58,13 +62,14 @@ class OFDMRayleigh(sionna.phy.Block):
             pilot_pattern="kronecker",
             pilot_ofdm_symbol_indices=pilot_indices
         )
-        self.rg              = rg
-        self.n_bits          = num_bits_per_symbol
-        self.block_length    = rg.num_data_symbols * num_bits_per_symbol
-        self.perfect_csi     = perfect_csi
+        self.rg           = rg
+        self.n_bits       = num_bits_per_symbol
+        self.block_length = rg.num_data_symbols * num_bits_per_symbol
+        self.perfect_csi  = perfect_csi
+        self.mse_log      = []   # stores one MSE value per call()
 
-        rx_tx   = np.array([[1]])
-        sm      = StreamManagement(rx_tx, num_streams_per_tx=1)
+        rx_tx = np.array([[1]])
+        sm    = StreamManagement(rx_tx, num_streams_per_tx=1)
 
         self.rg_mapper     = ResourceGridMapper(rg)
         self.binary_source = sionna.phy.mapping.BinarySource()
@@ -99,12 +104,22 @@ class OFDMRayleigh(sionna.phy.Block):
         y_rg, h_freq   = self.channel(x_rg, no)
         h_hat, err_var = self.estimator(y_rg, no)
 
+        # Channel estimation MSE — only meaningful when not using perfect CSI
+        # Shape of h_freq and h_hat: [batch, num_rx, num_tx, num_streams, 1, num_ofdm_sym, fft_size]
+        # .abs() → magnitude of complex error, **2 → squared, .mean() → average over all dims
+        mse = ((h_freq - h_hat).abs() ** 2).mean().item()
+        self.mse_log.append(mse)
+
         if self.perfect_csi:
             h_hat   = h_freq
             err_var = torch.zeros_like(h_hat)
 
         llr = self.equalizer(y_rg, h_hat, err_var, no)
         return bits, llr
+
+    def reset_mse_log(self):
+        """Call before each simulate() to start fresh."""
+        self.mse_log = []
 
 # ── Instantiate models ─────────────────────────────────────────────────────────
 models = {
@@ -188,39 +203,71 @@ ax.set_xlim([EBN0_DB_MIN, EBN0_DB_MAX])
 plt.tight_layout()
 plt.show()
 
-# ── Print data bits per transmission for each config ──────────────────────────
-print("\nPilot overhead summary:")
-print(f"{'Config':<12} {'Pilot syms':>10} {'Data bits':>10} {'Overhead %':>12}")
-print("-" * 46)
-configs = [
-    ("2 pilots",  2,  models["2 pilots"].block_length),
-    ("4 pilots",  4,  models["4 pilots"].block_length),
-    ("6 pilots",  6,  models["6 pilots"].block_length),
-]
-max_bits = configs[0][2]
-for name, npilots, nbits in configs:
-    overhead = (max_bits - nbits) / max_bits * 100
-    print(f"{name:<12} {npilots:>10} {nbits:>10} {overhead:>11.1f}%")
+def compute_mse_per_snr(model, ebno_dbs, batch_size=1000, n_iter=50):
+    """
+    Runs model.call() n_iter times per SNR point and returns
+    mean channel estimation MSE at each SNR.
 
-ber_2_pilots = results['2 pilots']['bers']
-ber_4_pilots = results['4 pilots']['bers']
-ber_6_pilots = results['6 pilots']['bers']
-ber_perfect_csi = results['Perfect CSI']['bers']
-ebno_dbs_common = results['2 pilots']['snrs'] # Eb/No values are the same for all
+    Args:
+        model     : OFDMRayleigh instance (not perfect_csi)
+        ebno_dbs  : array of Eb/N0 values in dB
+        batch_size: samples per iteration
+        n_iter    : Monte Carlo iterations per SNR point
 
-mse_2_pilots = (ber_2_pilots - ber_perfect_csi)**2
-mse_4_pilots = (ber_4_pilots - ber_perfect_csi)**2
-mse_6_pilots = (ber_6_pilots - ber_perfect_csi)**2
+    Returns:
+        mse_per_snr: list of mean MSE values, one per SNR point
+    """
+    mse_per_snr = []
 
-fig, ax = plt.subplots(figsize=(10, 6))
-ax.semilogy(ebno_dbs_common, mse_2_pilots, 'md-', label='MSE (2 pilots vs Perfect CSI)')
-ax.semilogy(ebno_dbs_common, mse_4_pilots, 'bs-', label='MSE (4 pilots vs Perfect CSI)')
-ax.semilogy(ebno_dbs_common, mse_6_pilots, 'g^-', label='MSE (6 pilots vs Perfect CSI)')
+    for ebno_db in ebno_dbs:
+        model.reset_mse_log()   # clear log before this SNR point
+        eb_tensor = torch.tensor(float(ebno_db))
+
+        for _ in range(n_iter):
+            model(batch_size, eb_tensor)   # call() logs MSE internally
+
+        mean_mse = np.mean(model.mse_log)
+        mse_per_snr.append(mean_mse)
+        print(f"Eb/N0={ebno_db:6.1f} dB | "
+              f"Channel MSE={mean_mse:.6f} | "
+              f"log10(MSE)={np.log10(mean_mse):.3f}")
+
+    return mse_per_snr
+
+# ── Run for each pilot config ──────────────────────────────────────────────────
+ebno_dbs = np.linspace(EBN0_DB_MIN, EBN0_DB_MAX, 20)
+
+print("=" * 55)
+print("2 pilots:")
+print("=" * 55)
+mse_2p = compute_mse_per_snr(models["2 pilots"], ebno_dbs)
+
+print("\n" + "=" * 55)
+print("4 pilots:")
+print("=" * 55)
+mse_4p = compute_mse_per_snr(models["4 pilots"], ebno_dbs)
+
+print("\n" + "=" * 55)
+print("6 pilots:")
+print("=" * 55)
+mse_6p = compute_mse_per_snr(models["6 pilots"], ebno_dbs)
+
+# ── Plot channel MSE ───────────────────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(9, 5))
+
+ax.semilogy(ebno_dbs, mse_2p, 'md-', linewidth=2, markersize=5,
+            label="Channel MSE — 2 pilots (LS + linear)")
+ax.semilogy(ebno_dbs, mse_4p, 'bs-', linewidth=2, markersize=5,
+            label="Channel MSE — 4 pilots (LS + linear)")
+ax.semilogy(ebno_dbs, mse_6p, 'g^-', linewidth=2, markersize=5,
+            label="Channel MSE — 6 pilots (LS + linear)")
 
 ax.set_xlabel("Eb/N0 (dB)", fontsize=12)
-ax.set_ylabel("Mean Squared Error (BER)", fontsize=12)
-ax.set_title("Mean Squared Error between Estimated and Perfect CSI BER", fontsize=13)
-ax.legend(fontsize=10, loc="upper right")
+ax.set_ylabel("Channel Estimation MSE  E[|H - Ĥ|²]", fontsize=12)
+ax.set_title("Channel Estimation MSE vs SNR\nEffect of Pilot Density — Rayleigh Fading", fontsize=13)
+ax.legend(fontsize=10)
 ax.grid(True, which="both")
+ax.set_xlim([EBN0_DB_MIN, EBN0_DB_MAX])
+
 plt.tight_layout()
 plt.show()
