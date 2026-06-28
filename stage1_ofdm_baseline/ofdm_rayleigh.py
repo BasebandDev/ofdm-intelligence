@@ -262,3 +262,16 @@ ax.set_xlim([EBN0_DB_MIN, EBN0_DB_MAX])
 
 plt.tight_layout()
 plt.show()
+# ── Print MSE summary ──────────────────────────────────────────────────────────
+print("\nChannel MSE summary at selected SNR points:")
+print(f"{'Eb/N0 (dB)':<12} {'2 pilots':>12} {'4 pilots':>12} {'6 pilots':>12}")
+print("-" * 50)
+for snr in [-3.0, 0.0, 5.0, 10.0, 20.0, 30.0]:
+    # Find closest SNR point in log
+    def nearest(series, val):
+        idx = np.abs(series.index - val).argmin()
+        return series.iloc[idx]
+    v2 = nearest(mse_2p, snr)
+    v4 = nearest(mse_4p, snr)
+    v6 = nearest(mse_6p, snr)
+    print(f"{snr:<12.1f} {v2:>12.6f} {v4:>12.6f} {v6:>12.6f}")
