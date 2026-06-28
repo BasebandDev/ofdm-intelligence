@@ -7,6 +7,7 @@
 - StreamManagement - defines the relationship between transmitters, receivers and data streams. SISO case - 1 Rx, 1 Tx and 1 stream
 - Channel estimation at pilot REs is done using least squares, and the interpolation for data caryring REs using nearest negbours, Linear and LMMSE are supported.
 - LMMSE needs channel statistics and nearest neigbours is the easiest to implemnet but very error prone.
+- OFDMChannel  vs GenerateOFDMChannel - OFDMChannel generates y_rg for input x_rg and no, whereas GenerateOFDMChannel returns h_freq (channel impulse response samples)
 
 
 
